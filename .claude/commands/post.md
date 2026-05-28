@@ -277,10 +277,18 @@ screenshot-3.png   # 核心功能2
 
 **不要自动删除！** 等待用户明确指示后再清理。
 
-告知用户：
-- 临时目录位置：`$REVIEW_DIR`
+**重要：生成的文章和输出目录永远不要删除！**
+- 输出目录：`/Users/zanestear/PycharmProjects/GithubProjectPosts/{project-name}/`
+- 这个目录和里面的所有文件（文章、截图）是最终成果，不属于临时环境
+
+**只清理临时目录：**
+- 临时目录位置：`$REVIEW_DIR`（/tmp/review-*）
 - 清理命令：`rm -rf $REVIEW_DIR`
 - Docker 容器停止命令：`docker-compose down` 或 `docker stop <container>`
+
+**区分：**
+- ✅ 可以删除：`/tmp/review-*`（临时 clone 和 venv）
+- ❌ 不能删除：`/Users/zanestear/PycharmProjects/GithubProjectPosts/{project-name}/`（生成的文章）
 
 ## 注意事项
 
