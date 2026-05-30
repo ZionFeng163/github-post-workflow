@@ -427,59 +427,125 @@ screenshot-3.png   # 核心功能2
 1. 选择要发布的帖子：中文长帖 / 英文长帖 / 中文短帖 / 英文短帖（多选）
 2. 选择要上传的截图：列出所有截图文件，让用户勾选（多选）
 
-**第二步：准备博客文章目录**
+**第二步：读取源文件**
+
+```bash
+# 读取用户选择的 markdown 文件
+POST_FILE="/Users/zanestear/PycharmProjects/GithubProjectPosts/{project-name}/{selected-post}.md"
+
+# 获取源目录（用于查找图片）
+SOURCE_DIR=$(dirname "$POST_FILE")
+```
+
+**第三步：提取文章信息**
+
+从 markdown 文件中提取：
+- **标题**：第一行 `#` 开头的内容
+- **GitHub 链接**：文中出现的 GitHub 仓库链接
+- **内容**：除去标题后的正文内容
+
+**第四步：查找图片**
+
+```bash
+# 检查源目录中的图片（只复制用户选择的）
+ls -la "$SOURCE_DIR" | grep -E "\.(png|jpg|jpeg|gif|webp)$"
+```
+
+图片命名规则：
+- `screenshot-1.png` → 封面图 + 文中插图
+- `screenshot-2.png` → 文中插图
+- 其他图片按顺序编号
+
+**第五步：创建博客文章目录**
 
 博客服务器信息：
 - 地址：`root@45.61.135.162`
 - 博客项目路径：`/var/www/blog`
 - 文章目录：`/var/www/blog/src/content/posts/{slug}/`
 
-slug 规则：小写字母 + 数字 + 连字符，如 `understand-anything`
-
-在本地创建博客文章目录（如果用户选了中文帖子，目录名用项目名的小写连字符形式）：
 ```bash
-BLOG_POST_DIR="/tmp/blog-post-{slug}"
-mkdir -p "$BLOG_POST_DIR"
+# 博客文章目录
+BLOG_DIR="/Users/zanestear/PycharmProjects/ToyProject/blog/src/content/posts"
+
+# 从文件名或标题生成目录名（小写，用连字符分隔）
+POST_DIR_NAME=$(echo "$POST_TITLE" | tr '[:upper:]' '[:lower:]' | sed 's/ /-/g' | sed 's/[^a-z0-9-]//g')
+
+# 创建目录
+mkdir -p "$BLOG_DIR/$POST_DIR_NAME"
 ```
 
-**第三步：转换帖子格式**
+slug 规则：只使用小写字母、数字和连字符，如 `understand-anything`
 
-将用户选择的帖子转换为博客格式：
+**第六步：复制图片到博客目录**
 
-1. **长帖子** → 直接用，但需要添加 frontmatter：
+```bash
+# 只复制用户选择的图片
+cp "$SOURCE_DIR/screenshot-1.png" "$BLOG_DIR/$POST_DIR_NAME/" 2>/dev/null
+cp "$SOURCE_DIR/screenshot-2.png" "$BLOG_DIR/$POST_DIR_NAME/" 2>/dev/null
+# 按用户选择复制其他图片
+```
+
+**第七步：生成 Frontmatter**
+
+在文章开头添加 frontmatter：
+
 ```yaml
 ---
-title: "吸引人的标题"
+title: "文章标题"
 published: YYYY-MM-DD
-description: "一句话描述"
+description: "文章描述（从内容中提取或生成）"
 image: "./screenshot-1.png"  # 封面图
-tags: ["标签1", "标签2"]
-category: "工具推荐"  # 或 "开发效率"、"AI" 等
+tags: ["标签1", "标签2", "标签3"]
+category: 分类
 draft: false
 ---
 ```
 
-2. **短帖子** → 需要改写为博客文章，因为短帖子是推特 Thread 格式，不适合直接发布
+**分类规则：**
+- 工具推荐 → `category: 工具推荐`
+- 教程类 → `category: 教程`
+- 思考类 → `category: 随笔`
 
-**第四步：复制截图**
+**标签提取：**
+- 从文章内容中提取关键词
+- 从 GitHub 仓库的 topics 中提取
+- 常用标签：`AI`, `工具`, `开源`, `开发效率`, `Git`, `Python`, `前端`
 
-将用户选择的截图复制到博客文章目录：
-```bash
-cp /Users/zanestear/PycharmProjects/GithubProjectPosts/{project-name}/screenshot-*.png "$BLOG_POST_DIR/"
+**第八步：添加图片引用**
+
+在文章正文中适当位置添加图片引用：
+
+```markdown
+![图片描述](./screenshot-1.png)
 ```
 
-**第五步：上传到 VPS**
+**插图位置规则：**
+- 封面图：frontmatter 的 `image` 字段自动显示在文章列表
+- 文中插图：在描述功能或界面时插入
+- 每张图片配一句说明文字
+
+**第九步：上传到 VPS**
 
 ```bash
-# 上传文章目录到 VPS
-scp -r "$BLOG_POST_DIR" root@45.61.135.162:/var/www/blog/src/content/posts/{slug}/
+# VPS 信息
+VPS_HOST="45.61.135.162"
+VPS_USER="root"
+VPS_BLOG_DIR="/var/www/blog/src/content/posts"
+
+# 使用 rsync 上传（更快、更可靠）
+rsync -avz --delete \
+  --exclude='node_modules' \
+  --exclude='.git' \
+  -e "ssh -o StrictHostKeyChecking=no" \
+  "$BLOG_DIR/$POST_DIR_NAME/" \
+  ${VPS_USER}@${VPS_HOST}:${VPS_BLOG_DIR}/${POST_DIR_NAME}/
 ```
 
-**第六步：部署**
+**第十步：重建博客**
 
 ```bash
-# 在 VPS 上构建并部署
-ssh root@45.61.135.162 << 'EOF'
+# SSH 到 VPS 执行构建
+ssh -o StrictHostKeyChecking=no ${VPS_USER}@${VPS_HOST} << 'EOF'
 cd /var/www/blog
 rm -rf .astro dist
 NODE_OPTIONS='--max-old-space-size=512' pnpm build
@@ -487,10 +553,56 @@ systemctl reload nginx
 EOF
 ```
 
-**发布后告知用户：**
-- 博客地址：`https://zionfeng.org:8443/blog/{slug}/`
-- 已上传的文件列表
-- 部署状态
+**第十一步：提交并推送（如果有本地 Git）**
+
+```bash
+# 进入博客目录
+cd /Users/zanestear/PycharmProjects/ToyProject/blog
+
+# 添加所有更改
+git add -A
+
+# 提交
+git commit -m "feat: add $POST_TITLE blog post"
+
+# 推送到 GitHub
+git push
+```
+
+**第十二步：输出结果**
+
+成功后输出：
+```
+✅ 博客文章已发布！
+
+📝 标题: {POST_TITLE}
+📁 目录: src/content/posts/{POST_DIR_NAME}/
+🖼️ 封面: screenshot-1.png
+🏷️ 标签: {tags}
+📂 分类: {category}
+
+🌐 服务器已重建
+📤 已推送到 GitHub
+
+🔗 访问: https://zionfeng.org:8443/posts/{POST_DIR_NAME}/
+```
+
+**错误处理：**
+
+图片缺失：
+1. 询问用户是否需要添加封面图
+2. 如果需要，等待用户提供图片路径
+3. 如果不需要，使用默认封面或不设置
+
+上传失败：
+1. 检查网络连接
+2. 检查 SSH 密钥配置
+3. 尝试手动上传
+
+构建失败：
+1. 检查错误日志
+2. 常见问题：图片路径错误、frontmatter 格式错误
+3. 修复后重新构建
 
 ### 8. 环境清理
 
