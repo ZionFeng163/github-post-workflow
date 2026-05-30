@@ -15,19 +15,31 @@
 REVIEW_DIR="/tmp/review-$(basename $GITHUB_URL)-$(date +%s)"
 mkdir -p "$REVIEW_DIR"
 
-# Clone 项目
-git clone "$GITHUB_URL" "$REVIEW_DIR/repo"
+# Clone 项目（浅克隆，加快速度）
+git clone --depth 1 "$GITHUB_URL" "$REVIEW_DIR/repo"
 ```
 
 ### 2. 项目分析
 
-**第一步：读取并分析以下文件：**
+**第一步：获取项目基本信息**
+
+```bash
+cd "$REVIEW_DIR/repo"
+
+# 获取 stars/forks（用于文章中增加可信度）
+REPO_NAME=$(basename "$GITHUB_URL" .git)
+OWNER=$(echo "$GITHUB_URL" | awk -F'/' '{print $(NF-1)}')
+gh api "repos/$OWNER/$REPO_NAME" --jq '{stars: .stargazers_count, forks: .forks_count, description: .description}'
+```
+
+**第二步：读取并分析以下文件：**
 - `README.md` - 项目介绍和功能
-- `package.json` / `pyproject.toml` / `requirements.txt` - 依赖
+- `package.json` / `pyproject.toml` / `requirements.txt` / `Cargo.toml` - 依赖和语言
 - `docker-compose.yml` / `Dockerfile` - 容器配置
+- `SKILL.md` - 技能包配置（如果有）
 - 其他配置文件
 
-**第二步：平台兼容性检查**
+**第三步：平台兼容性检查**
 
 在开始前必须告知用户支持的平台：
 
@@ -69,13 +81,15 @@ check_platform() {
 - 支持的平台（Linux/macOS/Windows/Docker）
 - 是否有平台限制
 - 建议的运行方式
+- 项目 stars/forks 数量
 
 **记录：**
 - 项目名称和用途
 - 主要功能特点
-- 技术栈
+- 技术栈和语言
 - 是否有官方 Docker 支持
 - 支持的平台
+- stars/forks 数量
 
 ### 3. 环境搭建与运行
 
@@ -83,11 +97,16 @@ check_platform() {
 
 根据项目特征判断类型：
 
-| 类型 | 特征 |
-|------|------|
-| Web 项目 | 有 Dockerfile、package.json、requirements.txt + 启动命令含 web/server/app |
-| GUI 项目 | 有 PyQt/PySide/tkinter/wx 依赖，或 README 提到桌面应用 |
-| CLI 项目 | 命令行工具，无 GUI 依赖 |
+| 类型 | 特征 | 安装方式 |
+|------|------|----------|
+| Web 项目 | 有 Dockerfile/docker-compose，或 README 提到 web/server | Docker 优先 |
+| CLI (Python) | 有 setup.py/pyproject.toml/requirements.txt | venv + pip |
+| CLI (Rust) | 有 Cargo.toml，README 提到 CLI | cargo install |
+| CLI (Node) | 有 package.json + bin 字段 | npm install -g |
+| npm 包 | 有 package.json + "main" 字段 | npm install（在项目中测试） |
+| Skill 包 | 有 SKILL.md 或 npx skills add | npx skills add |
+| GUI 项目 | 有 PyQt/PySide/tkinter/wx 依赖 | venv + pip |
+| 库/框架 | 被其他项目 import 使用 | pip/cargo/npm install |
 
 **第二步：按类型选择方案**
 
@@ -108,20 +127,84 @@ docker run -d -p 8080:8080 review-app
 
 ---
 
+**CLI (Python) 项目 → venv + pip：**
+
+```bash
+cd "$REVIEW_DIR/repo"
+
+# 创建隔离环境
+python3 -m venv .venv
+
+# 安装依赖（使用完整路径，避免激活问题）
+"$REVIEW_DIR/repo/.venv/bin/pip" install -r requirements.txt  # 或 pip install -e .
+
+# 运行（使用完整路径）
+"$REVIEW_DIR/repo/.venv/bin/python" main.py
+```
+
+⚠️ **注意：** 后台任务中 `source .venv/bin/activate` 可能不生效，始终使用完整路径调用。
+
+---
+
+**CLI (Rust) 项目 → cargo install：**
+
+```bash
+cd "$REVIEW_DIR/repo"
+
+# 安装 CLI 工具
+cargo install --path .
+
+# 或直接运行测试
+cargo run -- --help
+```
+
+---
+
+**npm 包 → 在测试项目中使用：**
+
+```bash
+cd "$REVIEW_DIR/repo"
+
+# 创建测试项目
+mkdir -p /tmp/test-npm && cd /tmp/test-npm
+npm init -y
+npm install "$REVIEW_DIR/repo"
+
+# 测试使用
+node -e "const pkg = require('$(basename $GITHUB_URL)'); console.log(pkg)"
+```
+
+---
+
+**Skill 包 → npx skills add：**
+
+```bash
+cd "$REVIEW_DIR/repo"
+
+# 检查 SKILL.md 内容
+cat SKILL.md | head -50
+
+# 安装到测试项目
+mkdir -p /tmp/test-skill && cd /tmp/test-skill
+npm init -y
+npx skills add "$GITHUB_URL"
+```
+
+---
+
 **GUI 项目 → venv + pip（隔离环境）：**
 
 ```bash
 cd "$REVIEW_DIR/repo"
 
-# 创建隔离的虚拟环境（不污染系统）
+# 创建隔离的虚拟环境
 python3 -m venv .venv
-source .venv/bin/activate
 
-# 安装 GUI 依赖（只装到 venv 里）
-pip install pyqt5  # 或 pyqt6、pyside2，根据项目要求
+# 安装 GUI 依赖
+"$REVIEW_DIR/repo/.venv/bin/pip" install pyqt5  # 或 pyqt6、pyside2
 
-# 运行（从源码直接运行，不安装到系统）
-python -m cola  # 或项目的启动命令
+# 运行
+"$REVIEW_DIR/repo/.venv/bin/python" -m cola
 ```
 
 ⚠️ **GUI 项目禁止使用：**
@@ -131,36 +214,67 @@ python -m cola  # 或项目的启动命令
 
 ---
 
-**CLI 项目 → venv + pip：**
+**库/框架 → 安装并测试导入：**
 
 ```bash
 cd "$REVIEW_DIR/repo"
 
-# 创建隔离环境
+# Python 库
 python3 -m venv .venv
-source .venv/bin/activate
+"$REVIEW_DIR/repo/.venv/bin/pip" install -e .
+"$REVIEW_DIR/repo/.venv/bin/python" -c "import $(basename $GITHUB_URL); print('OK')"
 
-# 安装依赖
-pip install -r requirements.txt  # 或 pip install -e .
-
-# 运行
-python main.py  # 或项目的启动命令
+# Rust 库
+cargo build
 ```
 
 ---
 
 **记录：**
-- 项目类型（Web/GUI/CLI）
+- 项目类型（Web/CLI/Skill/库等）
 - 使用的运行方式
 - 暴露的端口号（Web 项目）
 - 运行状态
-
-**记录：**
-- 使用的运行方式
-- 暴露的端口号
-- 运行状态
+- 是否需要特殊依赖（如 Tesseract、Docker）
 
 ### 4. 功能体验与截图
+
+**优先使用 GitHub 仓库自带的截图/示例图片！**
+
+**第一步：检查仓库自带资源**
+
+```bash
+cd "$REVIEW_DIR/repo"
+
+# 检查常见的截图目录
+ls -la assets/ images/ screenshots/ demo/ docs/ examples/ public/ static/ 2>/dev/null
+
+# 检查 README 中引用的图片（区分 badge 和演示图）
+grep -E '\.(png|jpg|jpeg|gif|webp|svg)' README.md 2>/dev/null | grep -v 'badge' | grep -v 'shields.io' | grep -v 'img.shields.io'
+
+# 检查 .github 目录下的图片
+find .github -name "*.png" -o -name "*.jpg" -o -name "*.gif" 2>/dev/null
+```
+
+**第二步：下载仓库自带的截图**
+
+如果仓库有高质量截图，优先下载使用：
+
+```bash
+# 处理 GitHub user-attachments URL（需要直接下载）
+# 例如：https://github.com/user-attachments/assets/xxx
+curl -sL "https://github.com/user-attachments/assets/xxx" -o "$OUTPUT_DIR/screenshot-1.png"
+
+# 处理 raw.githubusercontent.com URL
+curl -sL "https://raw.githubusercontent.com/{owner}/{repo}/main/assets/demo.png" -o "$OUTPUT_DIR/screenshot-1.png"
+
+# 处理相对路径（需要先确定 base URL）
+# 例如：assets/demo.png → https://raw.githubusercontent.com/{owner}/{repo}/main/assets/demo.png
+```
+
+**第三步：只有在没有自带截图时才自己截取**
+
+---
 
 **Web 项目：**
 - 使用浏览器打开 localhost:端口
@@ -169,25 +283,38 @@ python main.py  # 或项目的启动命令
 
 **CLI 项目：**
 - 运行主要命令
-- 截图终端输出
+- 截图终端输出（使用 `script` 或 `asciinema`）
 - 记录命令和输出
 
 **GUI 项目：**
 - 截图应用界面
 - 记录交互流程
 
+---
+
 **截图保存位置：**
 直接保存到输出目录：`/Users/zanestear/PycharmProjects/GithubProjectPosts/{project-name}/`
 
 文件命名：
 ```
-screenshot-1.png   # 主界面/首页
+screenshot-1.png   # 主界面/首页（优先用仓库自带）
 screenshot-2.png   # 核心功能1
 screenshot-3.png   # 核心功能2
 ...                # 更多截图
 ```
 
 **注意：** 不要创建 screenshots 子目录，截图直接放在项目根目录下。
+
+**截图来源优先级：**
+1. GitHub 仓库自带的 assets/images 目录
+2. README 中引用的演示图片（排除 badge）
+3. 自己截取的运行效果
+
+**截图质量要求：**
+- 清晰可读
+- 展示核心功能
+- 避免空白/无意义内容（如空终端、空页面）
+- 如果是文档类项目，截取有实际内容的页面
 
 ### 5. 内容生成
 
@@ -273,9 +400,9 @@ screenshot-3.png   # 核心功能2
 
 **注意：** 截图直接放在项目目录下，不要子目录。
 
-## 环境清理
+### 7. 环境清理
 
-**不要自动删除！** 等待用户明确指示后再清理。
+**等所有内容生成完毕后，最后才清理！**
 
 **重要：生成的文章和输出目录永远不要删除！**
 - 输出目录：`/Users/zanestear/PycharmProjects/GithubProjectPosts/{project-name}/`
@@ -290,13 +417,22 @@ screenshot-3.png   # 核心功能2
 - ✅ 可以删除：`/tmp/review-*`（临时 clone 和 venv）
 - ❌ 不能删除：`/Users/zanestear/PycharmProjects/GithubProjectPosts/{project-name}/`（生成的文章）
 
+**清理时机：**
+1. 确认所有文件已生成到输出目录
+2. 确认截图已复制到输出目录
+3. 确认文章内容完整
+4. 最后才执行清理
+
 ## 注意事项
 
 1. **不要在项目目录安装全局依赖**
 2. **优先使用 Docker 隔离**
 3. **记录所有步骤**，方便用户复现
-4. **截图要清晰**，展示核心功能
+4. **截图要清晰**，展示核心功能，避免无意义内容
 5. **文章面向普通用户**，避免过多技术术语
+6. **Clone 用 --depth 1**，加快速度
+7. **Python venv 用完整路径调用**，避免激活问题
+8. **检查仓库自带截图**，优先使用，没有再自己截
 
 ## 文风约束（反 AI 痕迹规则）
 
