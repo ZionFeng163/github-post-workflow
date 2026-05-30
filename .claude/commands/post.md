@@ -417,7 +417,82 @@ screenshot-3.png   # 核心功能2
 
 **注意：** 截图直接放在项目目录下，不要子目录。
 
-### 7. 环境清理
+### 7. 发布到博客
+
+内容生成完毕后，询问用户是否发布到博客。
+
+**第一步：让用户选择要发布的内容**
+
+用 AskUserQuestion 询问：
+1. 选择要发布的帖子：中文长帖 / 英文长帖 / 中文短帖 / 英文短帖（多选）
+2. 选择要上传的截图：列出所有截图文件，让用户勾选（多选）
+
+**第二步：准备博客文章目录**
+
+博客服务器信息：
+- 地址：`root@45.61.135.162`
+- 博客项目路径：`/var/www/blog`
+- 文章目录：`/var/www/blog/src/content/posts/{slug}/`
+
+slug 规则：小写字母 + 数字 + 连字符，如 `understand-anything`
+
+在本地创建博客文章目录（如果用户选了中文帖子，目录名用项目名的小写连字符形式）：
+```bash
+BLOG_POST_DIR="/tmp/blog-post-{slug}"
+mkdir -p "$BLOG_POST_DIR"
+```
+
+**第三步：转换帖子格式**
+
+将用户选择的帖子转换为博客格式：
+
+1. **长帖子** → 直接用，但需要添加 frontmatter：
+```yaml
+---
+title: "吸引人的标题"
+published: YYYY-MM-DD
+description: "一句话描述"
+image: "./screenshot-1.png"  # 封面图
+tags: ["标签1", "标签2"]
+category: "工具推荐"  # 或 "开发效率"、"AI" 等
+draft: false
+---
+```
+
+2. **短帖子** → 需要改写为博客文章，因为短帖子是推特 Thread 格式，不适合直接发布
+
+**第四步：复制截图**
+
+将用户选择的截图复制到博客文章目录：
+```bash
+cp /Users/zanestear/PycharmProjects/GithubProjectPosts/{project-name}/screenshot-*.png "$BLOG_POST_DIR/"
+```
+
+**第五步：上传到 VPS**
+
+```bash
+# 上传文章目录到 VPS
+scp -r "$BLOG_POST_DIR" root@45.61.135.162:/var/www/blog/src/content/posts/{slug}/
+```
+
+**第六步：部署**
+
+```bash
+# 在 VPS 上构建并部署
+ssh root@45.61.135.162 << 'EOF'
+cd /var/www/blog
+rm -rf .astro dist
+NODE_OPTIONS='--max-old-space-size=512' pnpm build
+systemctl reload nginx
+EOF
+```
+
+**发布后告知用户：**
+- 博客地址：`https://zionfeng.org:8443/blog/{slug}/`
+- 已上传的文件列表
+- 部署状态
+
+### 8. 环境清理
 
 **等所有内容生成完毕后，最后才清理！**
 
@@ -426,12 +501,13 @@ screenshot-3.png   # 核心功能2
 - 这个目录和里面的所有文件（文章、截图）是最终成果，不属于临时环境
 
 **只清理临时目录：**
-- 临时目录位置：`$REVIEW_DIR`（/tmp/review-*）
-- 清理命令：`rm -rf $REVIEW_DIR`
+- 项目临时目录：`$REVIEW_DIR`（/tmp/review-*）
+- 博客临时目录：`/tmp/blog-post-{slug}`（发布时创建的）
 - Docker 容器停止命令：`docker-compose down` 或 `docker stop <container>`
+- 清理命令：`rm -rf $REVIEW_DIR /tmp/blog-post-{slug}`
 
 **区分：**
-- ✅ 可以删除：`/tmp/review-*`（临时 clone 和 venv）
+- ✅ 可以删除：`/tmp/review-*`、`/tmp/blog-post-*`（临时文件）
 - ❌ 不能删除：`/Users/zanestear/PycharmProjects/GithubProjectPosts/{project-name}/`（生成的文章）
 
 **清理时机：**
