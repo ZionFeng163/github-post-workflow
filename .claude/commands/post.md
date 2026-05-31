@@ -456,7 +456,7 @@ ls -la "$SOURCE_DIR" | grep -E "\.(png|jpg|jpeg|gif|webp)$"
 - `screenshot-2.png` → 文中插图
 - 其他图片按顺序编号
 
-**第五步：创建博客文章目录**
+**第五步：上传图片到 VPS**
 
 博客服务器信息：
 - 地址：`root@45.61.135.162`
@@ -464,42 +464,54 @@ ls -la "$SOURCE_DIR" | grep -E "\.(png|jpg|jpeg|gif|webp)$"
 - 文章目录：`/var/www/blog/src/content/posts/{slug}/`
 
 ```bash
-# 博客文章目录
-BLOG_DIR="/Users/zanestear/PycharmProjects/ToyProject/blog/src/content/posts"
-
 # 从文件名或标题生成目录名（小写，用连字符分隔）
 POST_DIR_NAME=$(echo "$POST_TITLE" | tr '[:upper:]' '[:lower:]' | sed 's/ /-/g' | sed 's/[^a-z0-9-]//g')
 
-# 创建目录
-mkdir -p "$BLOG_DIR/$POST_DIR_NAME"
+# 在 VPS 上创建文章目录
+ssh -o StrictHostKeyChecking=no root@45.61.135.162 "mkdir -p /var/www/blog/src/content/posts/$POST_DIR_NAME"
+
+# 上传用户选择的图片到 VPS
+scp -o StrictHostKeyChecking=no "$SOURCE_DIR/screenshot-1.png" root@45.61.135.162:/var/www/blog/src/content/posts/$POST_DIR_NAME/ 2>/dev/null
+scp -o StrictHostKeyChecking=no "$SOURCE_DIR/screenshot-2.png" root@45.61.135.162:/var/www/blog/src/content/posts/$POST_DIR_NAME/ 2>/dev/null
+# 按用户选择上传其他图片
 ```
 
 slug 规则：只使用小写字母、数字和连字符，如 `understand-anything`
 
-**第六步：复制图片到博客目录**
+**第七步：在 VPS 上生成文章**
+
+直接在服务器上创建 index.md 文件（包含 frontmatter 和正文）：
 
 ```bash
-# 只复制用户选择的图片
-cp "$SOURCE_DIR/screenshot-1.png" "$BLOG_DIR/$POST_DIR_NAME/" 2>/dev/null
-cp "$SOURCE_DIR/screenshot-2.png" "$BLOG_DIR/$POST_DIR_NAME/" 2>/dev/null
-# 按用户选择复制其他图片
-```
-
-**第七步：生成 Frontmatter**
-
-在文章开头添加 frontmatter：
-
-```yaml
+# 在 VPS 上创建 index.md
+ssh -o StrictHostKeyChecking=no root@45.61.135.162 << EOF
+cat > /var/www/blog/src/content/posts/$POST_DIR_NAME/index.md << 'ARTICLE'
 ---
-title: "文章标题"
-published: YYYY-MM-DD
-description: "文章描述（从内容中提取或生成）"
-image: "./screenshot-1.png"  # 封面图
-tags: ["标签1", "标签2", "标签3"]
-category: 分类
+title: "$POST_TITLE"
+published: $(date +%Y-%m-%d)
+description: "$DESCRIPTION"
+image: "./screenshot-1.png"
+tags: [$TAGS]
+category: "$CATEGORY"
 draft: false
 ---
+
+$ARTICLE_CONTENT
+ARTICLE
+EOF
 ```
+
+**Frontmatter 字段说明：**
+
+| 字段 | 格式 | 示例 |
+|------|------|------|
+| title | 字符串 | `"代码库太大看不懂？..."` |
+| published | YYYY-MM-DD | `2026-05-30` |
+| description | 一句话 | `"Understand-Anything 是..."` |
+| image | 相对路径 | `"./screenshot-1.png"` |
+| tags | 数组 | `["AI", "工具", "开源"]` |
+| category | 字符串 | `"工具推荐"` |
+| draft | 布尔 | `false` |
 
 **分类规则：**
 - 工具推荐 → `category: 工具推荐`
@@ -511,65 +523,31 @@ draft: false
 - 从 GitHub 仓库的 topics 中提取
 - 常用标签：`AI`, `工具`, `开源`, `开发效率`, `Git`, `Python`, `前端`
 
-**第八步：添加图片引用**
-
-在文章正文中适当位置添加图片引用：
-
-```markdown
-![图片描述](./screenshot-1.png)
-```
-
-**插图位置规则：**
+**图片引用规则：**
 - 封面图：frontmatter 的 `image` 字段自动显示在文章列表
-- 文中插图：在描述功能或界面时插入
+- 文中插图：在描述功能或界面时插入 `![描述](./screenshot-1.png)`
 - 每张图片配一句说明文字
 
-**第九步：上传到 VPS**
+**第八步：在 VPS 上构建并推送**
 
 ```bash
-# VPS 信息
-VPS_HOST="45.61.135.162"
-VPS_USER="root"
-VPS_BLOG_DIR="/var/www/blog/src/content/posts"
-
-# 使用 rsync 上传（更快、更可靠）
-rsync -avz --delete \
-  --exclude='node_modules' \
-  --exclude='.git' \
-  -e "ssh -o StrictHostKeyChecking=no" \
-  "$BLOG_DIR/$POST_DIR_NAME/" \
-  ${VPS_USER}@${VPS_HOST}:${VPS_BLOG_DIR}/${POST_DIR_NAME}/
-```
-
-**第十步：重建博客**
-
-```bash
-# SSH 到 VPS 执行构建
-ssh -o StrictHostKeyChecking=no ${VPS_USER}@${VPS_HOST} << 'EOF'
+# SSH 到 VPS 执行构建和推送
+ssh -o StrictHostKeyChecking=no root@45.61.135.162 << 'EOF'
 cd /var/www/blog
+
+# Git 提交并推送
+git add -A
+git commit -m "feat: add $POST_TITLE blog post"
+git push
+
+# 构建博客
 rm -rf .astro dist
 NODE_OPTIONS='--max-old-space-size=512' pnpm build
 systemctl reload nginx
 EOF
 ```
 
-**第十一步：提交并推送（如果有本地 Git）**
-
-```bash
-# 进入博客目录
-cd /Users/zanestear/PycharmProjects/ToyProject/blog
-
-# 添加所有更改
-git add -A
-
-# 提交
-git commit -m "feat: add $POST_TITLE blog post"
-
-# 推送到 GitHub
-git push
-```
-
-**第十二步：输出结果**
+**第九步：输出结果**
 
 成功后输出：
 ```
@@ -581,10 +559,10 @@ git push
 🏷️ 标签: {tags}
 📂 分类: {category}
 
-🌐 服务器已重建
+🌐 服务器已构建
 📤 已推送到 GitHub
 
-🔗 访问: https://zionfeng.org:8443/posts/{POST_DIR_NAME}/
+🔗 访问: https://zionfeng.org/posts/{POST_DIR_NAME}/
 ```
 
 **错误处理：**
